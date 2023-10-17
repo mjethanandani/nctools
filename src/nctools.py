@@ -76,10 +76,12 @@ class NcTools():
             namespace = schema_element.find("nc:namespace", namespaces={"nc": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}).text
             location = schema_element.find("nc:location", namespaces={"nc": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}).text
             yang_file_name = self.directory + "/" + identifier + ".yang"
-            if os.path.exists(yang_file_name):
+            if os.path.exists(yang_file_name + ".yes"):
+                print(f"Skipped {yang_file_name} as it is already marked for download")
                 skipped_count += 1
                 continue
             self.mark_yang_file(identifier)
+            print(f"Marked {yang_file_name} for download")
             marked_count += 1
 
         logging.debug("Model list fetched.")
