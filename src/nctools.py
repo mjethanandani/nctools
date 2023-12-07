@@ -6,6 +6,7 @@ from lxml import etree
 from ncclient import manager
 import os
 import fnmatch
+import re
 
 # Configure logging
 logging.basicConfig(filename='/tmp/netconf.log', level=logging.INFO,
@@ -37,6 +38,7 @@ class NcTools():
 
     def get_schema(self, m, modname):
         schema = m.get_schema(modname)
+        self.strip_cdata(schema.xml)
         return schema
 
     def create_yang_dir(self):
@@ -99,6 +101,16 @@ class NcTools():
             return [f[:-5] for f in os.listdir(self.ncs_dir + "/src/ncs/yang") if fnmatch.fnmatch(f, '*.yang')]
         return []
 
+    def remove_cdata(self, match):
+        return match.group(1)
+        
+    def strip_cdata(self, node):
+        cleaned_schema_xml_string = re.sub(r'<\?xml.*\?>', '', node)
+        # Remove CDATA tags (if present) from the XML string
+        cleaned_schema_string = re.sub(r'<!\[CDATA\[(.*?)\]\]>', self.remove_cdata, 
+                                       cleaned_schema_xml_string, flags=re.DOTALL)
+        return cleaned_schema_string
+
     def download_models_in_yang_dir(self, m):
         model_list = self.list_models_in_yang_dir('marked')
         logging.debug(model_list)
@@ -133,21 +145,27 @@ class NcTools():
                 failed_count += 1
             else:
                 try:
+                    logging.info("Cleaning model " + modname)
+                    clean_model = self.strip_cdata(xml_module)
+                    
                     logging.info("Writing model " + modname + " to " + yang_file_name)
                     print("Writing model {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
-                    with open(yang_file_name, "w") as fd:
-                        fd.write(str(xml_module))
+                    with open(yang_file_name, "wb") as fd:
+                        fd.write(xml_module)
+                        #fd.write(str(clean_model.encode('utf-8')))
                         logging.info("Wrote model " + modname + " to " + yang_file_name)
                         print("Wrote {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
                         fd.close()
-                except Exception as e:
-                # Handle the exception, e.g., print an error message
-                    print(f"Error writing to file: {e}")
-                    logging.debug("Downloaded module " + modname)
-                    result_str += "Downloaded {0}\n".format(modname)
+                    
                     downloaded_count += 1
                     if os.path.exists(yang_file_name + ".yes"):
                         os.remove(yang_file_name + ".yes")
+                except Exception as e:
+                    # Handle the exception, e.g., print an error message
+                    print(f"Error writing to file: {e}")
+                    logging.debug("Downloaded module " + modname)
+                    result_str += "Downloaded {0}\n".format(modname)
+                    
                 except:
                     logging.debug("Writing failed")
                     result_str += "Failed {0} write error\n".format(modname)
@@ -181,7 +199,7 @@ def parse_args(sys_args):
                         help="Directory to store the list of schemas")
     parser.add_argument("--download", action='store_true',
                         help="Download the list of YANG models")
-    parser.add_argument("--schema", dest="schema", default="ietf-interfaces.yang",
+    parser.add_argument("--schema", dest="schema", default="openconfig-interfaces.yang",
                         action='store_true', help="Download the given schema")
     args = parser.parse_args()
     return (args)
