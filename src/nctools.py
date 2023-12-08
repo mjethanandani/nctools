@@ -6,6 +6,8 @@ from lxml import etree
 from ncclient import manager
 import os
 import fnmatch
+import re
+import xml.etree.ElementTree as ET
 
 # Configure logging
 logging.basicConfig(filename='/tmp/netconf.log', level=logging.INFO,
@@ -37,7 +39,8 @@ class NcTools():
 
     def get_schema(self, m, modname):
         schema = m.get_schema(modname)
-        return schema
+        clean_schema = self.strip_cdata(schema.xml)
+        return clean_schema
 
     def create_yang_dir(self):
         try:
@@ -99,6 +102,16 @@ class NcTools():
             return [f[:-5] for f in os.listdir(self.ncs_dir + "/src/ncs/yang") if fnmatch.fnmatch(f, '*.yang')]
         return []
 
+    def remove_cdata(self, match):
+        return match.group(1)
+        
+    def strip_cdata(self, node):
+        cleaned_schema_xml_string = re.sub(r'<\?xml.*\?>', '', node)
+        # Remove CDATA tags (if present) from the XML string
+        cleaned_schema_string = re.sub(r'<!\[CDATA\[(.*?)\]\]>', self.remove_cdata, 
+                                       cleaned_schema_xml_string, flags=re.DOTALL)
+        return cleaned_schema_string
+
     def download_models_in_yang_dir(self, m):
         model_list = self.list_models_in_yang_dir('marked')
         logging.debug(model_list)
@@ -133,21 +146,46 @@ class NcTools():
                 failed_count += 1
             else:
                 try:
+                    logging.info("Cleaning model " + modname)
+                    response_xml = self.strip_cdata(xml_module)
+                    # Parse the XML response
+                    root = ET.fromstring(response_xml)
+
+                    # Find the data element using the namespace
+                    data_element = root.find(".//{urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring}data")           
+
+                    # Print or process the data
+                    if data_element is not None:
+                        data_content = ET.tostring(data_element, encoding="unicode")
+                        # Define the namespace mapping
+                        namespace = {"ns0": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}
+                        # Remove the namespace declarations
+                        data_content = data_content.replace(f'xmlns:ns0="{namespace["ns0"]}"', "")
+                        # Remove the specific string
+                        data_content = data_content.replace('<ns0:data >', "")
+                        data_content = data_content.replace('</ns0:data>', "")
+                    else:
+                        logging.info("No data element found in the response.")
+                        
+                    
                     logging.info("Writing model " + modname + " to " + yang_file_name)
                     print("Writing model {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
                     with open(yang_file_name, "w") as fd:
-                        fd.write(str(xml_module))
+                        fd.write(data_content)
+                        #fd.write(str(clean_model.encode('utf-8')))
                         logging.info("Wrote model " + modname + " to " + yang_file_name)
                         print("Wrote {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
                         fd.close()
-                except Exception as e:
-                # Handle the exception, e.g., print an error message
-                    print(f"Error writing to file: {e}")
-                    logging.debug("Downloaded module " + modname)
-                    result_str += "Downloaded {0}\n".format(modname)
+                    
                     downloaded_count += 1
                     if os.path.exists(yang_file_name + ".yes"):
                         os.remove(yang_file_name + ".yes")
+                except Exception as e:
+                    # Handle the exception, e.g., print an error message
+                    print(f"Error writing to file: {e}")
+                    logging.debug("Downloaded module " + modname)
+                    result_str += "Downloaded {0}\n".format(modname)
+                    
                 except:
                     logging.debug("Writing failed")
                     result_str += "Failed {0} write error\n".format(modname)
@@ -181,7 +219,7 @@ def parse_args(sys_args):
                         help="Directory to store the list of schemas")
     parser.add_argument("--download", action='store_true',
                         help="Download the list of YANG models")
-    parser.add_argument("--schema", dest="schema", default="ietf-interfaces.yang",
+    parser.add_argument("--schema", dest="schema", default="openconfig-interfaces.yang",
                         action='store_true', help="Download the given schema")
     args = parser.parse_args()
     return (args)
@@ -213,7 +251,56 @@ def main(sys_args, ncTools, logger=None):
             if args.download:
                 ncTools.download_models_in_yang_dir(m)
             if args.schema:
-                ncTools.get_schema(m, "openconfig-interfaces")
+                modname = "openconfig-interfaces"
+                yang_file_name = ncTools.yang_directory + "/" + modname + ".yang"
+                clean_schema = ncTools.get_schema(m, modname)
+                try:
+                    xml_module = ncTools.get_schema(m, modname)
+                    logging.debug("Downloaded schema for " + modname)
+                    print("Downloaded schema for {modname}".format(modname=modname))
+                except Exception as e:
+                    logging.debug("Download failed")
+                    result_str += "Failed {0} fetch error '{1}'\n".format(modname, repr(e))
+                    failed_count += 1
+                else:
+                    try:
+                        logging.info("Cleaning model " + modname)
+                        response_xml = ncTools.strip_cdata(xml_module)
+                        # Parse the XML response
+                        root = ET.fromstring(response_xml)
+
+                        # Find the data element using the namespace
+                        data_element = root.find(".//{urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring}data")           
+
+                        # Print or process the data
+                        if data_element is not None:
+                            data_content = ET.tostring(data_element, encoding="unicode")
+                            # Define the namespace mapping
+                            namespace = {"ns0": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}
+                            # Remove the namespace declarations
+                            data_content = data_content.replace(f'xmlns:ns0="{namespace["ns0"]}"', "")
+                            # Remove the specific string
+                            data_content = data_content.replace('<ns0:data >', "")
+                            data_content = data_content.replace('</ns0:data>', "")
+                        else:
+                            print("No data element found in the response.")
+                        
+                        logging.info("Writing model " + modname + " to " + yang_file_name)
+                        print("Writing model {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
+                        with open(yang_file_name, "w") as fd:
+                            fd.write(data_content)
+                            #fd.write(str(clean_model.encode('utf-8')))
+                            logging.info("Wrote model " + modname + " to " + yang_file_name)
+                            print("Wrote {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
+                            fd.close()
+                    except Exception as e:
+                        # Handle the exception, e.g., print an error message
+                        print(f"Error writing to file: {e}")
+                        logging.debug("Downloaded module " + modname)
+                    
+                    except:
+                        logging.debug("Writing failed")
+
     except Exception as e:
       print("An error occurred:", str(e))
 
