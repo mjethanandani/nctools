@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import sys
 import logging
 import argparse
@@ -207,7 +206,8 @@ def main(sys_args, ncTools, logger=None):
     except Exception as e:
       print("An error occurred:", str(e))
 
-if __name__ == "__main__":
-    ncTools = NcTools()
+def run():
+    main(sys.argv[1:], NcTools())
 
-    main(sys.argv[1:], ncTools)
+if __name__ == "__main__":
+    run()
