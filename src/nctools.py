@@ -19,25 +19,16 @@ get_schemas = """
 </filter>
 """
 
-module_name = "ietf-interfaces"
-module_version = "2014-05-08"
-get_schema_request = f"""
-<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
-    <get-schema xmlns="urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring">
-        <identifier>{module_name}</identifier>
-        <version>{module_version}</version>
-    </get-schema>
-</rpc>
-"""
-
 class NcTools():
     def __init__(self):
         self.yang_directory = "/tmp/yang"
-        self.schema = "ietf-interfaces.yang"
 
     def get_schema(self, m, modname):
+        # ncclient's GetSchemaReply already extracts the text of the
+        # <data> element, so this is the raw YANG module content with
+        # no CDATA wrapper or surrounding rpc-reply/data XML.
         schema = m.get_schema(modname)
-        return schema
+        return schema.data
 
     def create_yang_dir(self):
         try:
@@ -89,6 +80,8 @@ class NcTools():
         print(f"Marked {marked_count} modules for download, skipped {skipped_count}")
 
     def list_models_in_yang_dir(self, cat='enabled'):
+        if cat != 'builtin' and not os.path.exists(self.yang_directory):
+            return []
         if(cat == 'marked'):
             return [f[:-9] for f in os.listdir(self.yang_directory) if fnmatch.fnmatch(f, '*.yang.yes')]
         if(cat == 'disabled'):
@@ -122,35 +115,27 @@ class NcTools():
                 print("Module {modname} already downloaded, skipping".format(modname=modname))
                 continue
             logging.debug("Downloading module " + modname)
-            print ("Downloading module {0}, {1}/{2}".format(modname, file_no, files_total))
             try:
-                xml_module = self.get_schema(m, modname)
+                yang_module = self.get_schema(m, modname)
                 logging.debug("Downloaded schema for " + modname)
-                print("Downloaded schema for {modname}".format(modname=modname))
             except Exception as e:
                 logging.debug("Download failed")
                 result_str += "Failed {0} fetch error '{1}'\n".format(modname, repr(e))
                 failed_count += 1
             else:
                 try:
-                    logging.info("Writing model " + modname + " to " + yang_file_name)
-                    print("Writing model {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
+                    logging.debug("Writing model " + modname + " to " + yang_file_name)
                     with open(yang_file_name, "w") as fd:
-                        fd.write(str(xml_module))
-                        logging.info("Wrote model " + modname + " to " + yang_file_name)
-                        print("Wrote {modname} to {yang_file_name}".format(modname=modname, yang_file_name=yang_file_name))
-                        fd.close()
-                except Exception as e:
-                # Handle the exception, e.g., print an error message
-                    print(f"Error writing to file: {e}")
-                    logging.debug("Downloaded module " + modname)
-                    result_str += "Downloaded {0}\n".format(modname)
+                        fd.write(yang_module)
+                    logging.debug("Wrote model " + modname + " to " + yang_file_name)
+                    print("[{0}/{1}] Downloaded {2} -> {3}".format(file_no, files_total, modname, yang_file_name))
+
                     downloaded_count += 1
                     if os.path.exists(yang_file_name + ".yes"):
                         os.remove(yang_file_name + ".yes")
-                except:
+                except Exception as e:
                     logging.debug("Writing failed")
-                    result_str += "Failed {0} write error\n".format(modname)
+                    result_str += "Failed {0} write error '{1}'\n".format(modname, repr(e))
                     failed_count += 1
         
         logging.debug("Model download done")
@@ -181,8 +166,8 @@ def parse_args(sys_args):
                         help="Directory to store the list of schemas")
     parser.add_argument("--download", action='store_true',
                         help="Download the list of YANG models")
-    parser.add_argument("--schema", dest="schema", default="ietf-interfaces.yang",
-                        action='store_true', help="Download the given schema")
+    parser.add_argument("--debug", action='store_true',
+                        help="Enable debug logging to the console")
     args = parser.parse_args()
     return (args)
 
@@ -190,9 +175,14 @@ def main(sys_args, ncTools, logger=None):
     args = parse_args(sys_args)
     if args.dir:
         ncTools.directory=args.dir
-    if args.schema:
-        ncTools.schema=args.schema
 
+    if args.debug:
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)
+        console = logging.StreamHandler()
+        console.setLevel(logging.DEBUG)
+        console.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        root_logger.addHandler(console)
 
     if logger:
         logger.debug("nctools.py: about to connect")
@@ -211,9 +201,9 @@ def main(sys_args, ncTools, logger=None):
             if args.list:
                 ncTools.get_list_of_schema(m)
             if args.download:
-                ncTools.download_models_in_yang_dir(m)
-            if args.schema:
-                ncTools.get_schema(m, "openconfig-interfaces")
+                result = ncTools.download_models_in_yang_dir(m)
+                print(result.get('message', result.get('error')))
+
     except Exception as e:
       print("An error occurred:", str(e))
 
