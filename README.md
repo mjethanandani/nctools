@@ -23,6 +23,8 @@ nctools --host <device> -u <username> -p <password> --download
 ```
 
 `--list` queries the device for its supported YANG modules and marks them
-for download in `/tmp/yang`. `--download` fetches and writes to disk every
-module marked by a previous `--list` run. Pass `--debug` to either command
-for verbose NETCONF/transport-level logging.
+for download in `/tmp/yang/<host>` (each device gets its own subdirectory,
+so concurrent runs against different devices don't collide; override with
+`-d`/`--dir`). `--download` fetches and writes to disk every module marked
+by a previous `--list` run. Pass `--debug` to either command for verbose
+NETCONF/transport-level logging.
