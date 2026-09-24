@@ -5,6 +5,7 @@ from lxml import etree
 from ncclient import manager
 import os
 import fnmatch
+import re
 
 # Configure logging
 logging.basicConfig(filename='/tmp/netconf.log', level=logging.INFO,
@@ -17,6 +18,13 @@ get_schemas = """
   </netconf-state>
 </filter>
 """
+
+def session_directory(base_directory, host):
+    # Give each target device its own subdirectory so that concurrent
+    # runs of this tool against different devices don't share (and
+    # overwrite) the same marker/schema files.
+    safe_host = re.sub(r"[^A-Za-z0-9._-]", "_", host)
+    return os.path.join(base_directory, safe_host)
 
 class NcTools():
     def __init__(self):
@@ -65,7 +73,7 @@ class NcTools():
             format_ = schema_element.find("nc:format", namespaces={"nc": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}).text
             namespace = schema_element.find("nc:namespace", namespaces={"nc": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}).text
             location = schema_element.find("nc:location", namespaces={"nc": "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"}).text
-            yang_file_name = self.directory + "/" + identifier + ".yang"
+            yang_file_name = self.yang_directory + "/" + identifier + ".yang"
             if os.path.exists(yang_file_name + ".yes"):
                 print(f"Skipped {yang_file_name} as it is already marked for download")
                 skipped_count += 1
@@ -161,8 +169,11 @@ def parse_args(sys_args):
                       help="NETCONF server SSH port")
     parser.add_argument("-l", "--list", action='store_true',
                         help="Get a list of schemas supported")
-    parser.add_argument("-d", "--dir", default="/tmp/yang",
-                        help="Directory to store the list of schemas")
+    parser.add_argument("-d", "--dir", default=None,
+                        help="Directory to store the list of schemas "
+                             "(default: /tmp/yang/<host>, kept separate "
+                             "per device so concurrent runs against "
+                             "different devices don't collide)")
     parser.add_argument("--download", action='store_true',
                         help="Download the list of YANG models")
     parser.add_argument("--debug", action='store_true',
@@ -173,7 +184,9 @@ def parse_args(sys_args):
 def main(sys_args, ncTools, logger=None):
     args = parse_args(sys_args)
     if args.dir:
-        ncTools.directory=args.dir
+        ncTools.yang_directory = args.dir
+    else:
+        ncTools.yang_directory = session_directory(ncTools.yang_directory, args.host)
 
     if args.debug:
         root_logger = logging.getLogger()
